@@ -51,3 +51,11 @@ Thumbs.db
 # Logs
 *.log
 logs/
+*.backup
+*.bak
+*.pyc
+__pycache__/
+.env
+.env.*
+node_modules/
+*.log

@@ -231,3 +231,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+@app.delete('/states/{state_id}')
+async def delete_state(state_id: str, db: Session = Depends(get_db)):
+    """Delete an agent state by ID"""
+    db_state = db.query(AgentStateDB).filter(AgentStateDB.id == state_id).first()
+    if not db_state:
+        raise HTTPException(status_code=404, detail='State not found')
+    db.delete(db_state)
+    db.commit()
+    return {'deleted': state_id}
