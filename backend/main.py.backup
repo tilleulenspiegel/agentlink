@@ -2,16 +2,13 @@
 AgentLink - Agent State Protocol
 FastAPI Backend
 """
-from fastapi import FastAPI, WebSocket, HTTPException, Depends
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
 from datetime import datetime
 from uuid import uuid4
-from sqlalchemy.orm import Session
 import uvicorn
-
-from database import get_db, init_db, AgentStateDB
 
 app = FastAPI(
     title="AgentLink API",
@@ -102,45 +99,10 @@ class AgentState(BaseModel):
 
 
 # ============================================================================
-# DATABASE HELPERS
+# IN-MEMORY STORE (PostgreSQL später)
 # ============================================================================
 
-def pydantic_to_db(state: AgentState) -> AgentStateDB:
-    """Convert Pydantic model to SQLAlchemy model"""
-    return AgentStateDB(
-        id=state.id,
-        agent_id=state.agent_id,
-        timestamp=state.timestamp,
-        task=state.task.dict(),
-        context=state.context.dict(),
-        knowledge=state.knowledge.dict(),
-        working_memory=state.working_memory.dict(),
-        handoff=state.handoff.dict() if state.handoff else None
-    )
-
-
-def db_to_pydantic(db_state: AgentStateDB) -> AgentState:
-    """Convert SQLAlchemy model to Pydantic model"""
-    return AgentState(
-        id=db_state.id,
-        agent_id=db_state.agent_id,
-        timestamp=db_state.timestamp,
-        task=Task(**db_state.task),
-        context=Context(**db_state.context),
-        knowledge=Knowledge(**db_state.knowledge),
-        working_memory=WorkingMemory(**db_state.working_memory),
-        handoff=Handoff(**db_state.handoff) if db_state.handoff else None
-    )
-
-
-# ============================================================================
-# STARTUP
-# ============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup"""
-    init_db()
+states_db: dict[str, AgentState] = {}
 
 
 # ============================================================================
@@ -162,59 +124,53 @@ async def root():
 
 
 @app.get("/health")
-async def health(db: Session = Depends(get_db)):
-    """Health check with state count from database"""
-    count = db.query(AgentStateDB).count()
+async def health():
     return {
         "status": "healthy",
-        "states_count": count,
+        "states_count": len(states_db),
         "timestamp": datetime.utcnow().isoformat()
     }
 
 
 @app.post("/states", response_model=AgentState)
-async def create_state(state: AgentState, db: Session = Depends(get_db)):
-    """Store a new agent state in PostgreSQL"""
-    db_state = pydantic_to_db(state)
-    db.add(db_state)
-    db.commit()
-    db.refresh(db_state)
+async def create_state(state: AgentState):
+    """Store a new agent state."""
+    states_db[state.id] = state
+    # TODO: Persist to PostgreSQL
     # TODO: Broadcast via Redis Pub/Sub
     # TODO: Index in ChromaDB
-    return db_to_pydantic(db_state)
+    return state
 
 
 @app.get("/states/{state_id}", response_model=AgentState)
-async def get_state(state_id: str, db: Session = Depends(get_db)):
-    """Retrieve an agent state by ID from PostgreSQL"""
-    db_state = db.query(AgentStateDB).filter(AgentStateDB.id == state_id).first()
-    if not db_state:
+async def get_state(state_id: str):
+    """Retrieve an agent state by ID."""
+    if state_id not in states_db:
         raise HTTPException(status_code=404, detail="State not found")
-    return db_to_pydantic(db_state)
+    return states_db[state_id]
 
 
 @app.get("/states", response_model=List[AgentState])
 async def list_states(
     agent_id: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = 100,
-    db: Session = Depends(get_db)
+    limit: int = 100
 ):
-    """List states with optional filters from PostgreSQL"""
-    query = db.query(AgentStateDB)
+    """List states with optional filters."""
+    results = list(states_db.values())
     
     if agent_id:
-        query = query.filter(AgentStateDB.agent_id == agent_id)
+        results = [s for s in results if s.agent_id == agent_id]
     
-    # TODO: Filter by status (need to query JSON field)
+    if status:
+        results = [s for s in results if s.task.status == status]
     
-    results = query.order_by(AgentStateDB.timestamp.desc()).limit(limit).all()
-    return [db_to_pydantic(s) for s in results]
+    return results[:limit]
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket for real-time state updates"""
+    """WebSocket for real-time state updates."""
     await websocket.accept()
     
     try:
