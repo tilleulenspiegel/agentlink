@@ -111,11 +111,11 @@ def pydantic_to_db(state: AgentState) -> AgentStateDB:
         id=state.id,
         agent_id=state.agent_id,
         timestamp=state.timestamp,
-        task=state.task.dict(),
-        context=state.context.dict(),
-        knowledge=state.knowledge.dict(),
-        working_memory=state.working_memory.dict(),
-        handoff=state.handoff.dict() if state.handoff else None
+        task=state.task.model_dump(mode="json"),
+        context=state.context.model_dump(mode="json"),
+        knowledge=state.knowledge.model_dump(mode="json"),
+        working_memory=state.working_memory.model_dump(mode="json"),
+        handoff=state.handoff.model_dump(mode="json") if state.handoff else None
     )
 
 
