@@ -417,6 +417,137 @@ async def delete_state(state_id: str, db: Session = Depends(get_db)):
 
 
 # ============================================================================
+# ANALYTICS & STATS ENDPOINTS
+# ============================================================================
+
+@app.get("/api/stats")
+async def get_stats(db: Session = Depends(get_db)):
+    """Get aggregated statistics"""
+    from sqlalchemy import func, distinct
+    
+    # Total states
+    total_states = db.query(func.count(AgentStateDB.id)).scalar() or 0
+    
+    # Total unique agents
+    unique_agents = db.query(func.count(distinct(AgentStateDB.agent_id))).scalar() or 0
+    
+    # States with handoffs
+    total_handoffs = db.query(func.count(AgentStateDB.id)).filter(
+        AgentStateDB.handoff.isnot(None)
+    ).scalar() or 0
+    
+    # States by task type
+    task_types = {}
+    for task_type in ["bug_fix", "feature", "review", "research", "refactor"]:
+        count = db.query(func.count(AgentStateDB.id)).filter(
+            AgentStateDB.task.op('->>')('type') == task_type
+        ).scalar() or 0
+        task_types[task_type] = count
+    
+    # States by status
+    statuses = {}
+    for status in ["pending", "in_progress", "blocked", "done"]:
+        count = db.query(func.count(AgentStateDB.id)).filter(
+            AgentStateDB.task.op('->>')('status') == status
+        ).scalar() or 0
+        statuses[status] = count
+    
+    # Currently active WebSocket connections
+    active_ws_connections = sum(len(conns) for conns in manager.active_connections.values())
+    
+    return {
+        "total_states": total_states,
+        "unique_agents": unique_agents,
+        "total_handoffs": total_handoffs,
+        "task_types": task_types,
+        "statuses": statuses,
+        "active_ws_connections": active_ws_connections,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/analytics")
+async def get_analytics(
+    hours: int = 24,
+    db: Session = Depends(get_db)
+):
+    """Get time-series analytics data"""
+    from sqlalchemy import func
+    from datetime import timedelta
+    
+    # Calculate time window
+    since = datetime.utcnow() - timedelta(hours=hours)
+    
+    # States created over time (grouped by hour)
+    states_over_time = db.query(
+        func.date_trunc('hour', AgentStateDB.timestamp).label('hour'),
+        func.count(AgentStateDB.id).label('count')
+    ).filter(
+        AgentStateDB.timestamp >= since
+    ).group_by('hour').order_by('hour').all()
+    
+    # Handoffs over time
+    handoffs_over_time = db.query(
+        func.date_trunc('hour', AgentStateDB.timestamp).label('hour'),
+        func.count(AgentStateDB.id).label('count')
+    ).filter(
+        AgentStateDB.timestamp >= since,
+        AgentStateDB.handoff.isnot(None)
+    ).group_by('hour').order_by('hour').all()
+    
+    # Activity by agent
+    activity_by_agent = db.query(
+        AgentStateDB.agent_id,
+        func.count(AgentStateDB.id).label('count')
+    ).filter(
+        AgentStateDB.timestamp >= since
+    ).group_by(AgentStateDB.agent_id).all()
+    
+    return {
+        "time_window_hours": hours,
+        "since": since.isoformat(),
+        "states_over_time": [
+            {"hour": row.hour.isoformat(), "count": row.count}
+            for row in states_over_time
+        ],
+        "handoffs_over_time": [
+            {"hour": row.hour.isoformat(), "count": row.count}
+            for row in handoffs_over_time
+        ],
+        "activity_by_agent": [
+            {"agent_id": row.agent_id, "count": row.count}
+            for row in activity_by_agent
+        ],
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/agents/active")
+async def get_active_agents():
+    """Get list of currently connected agents via WebSocket"""
+    # Extract agent IDs from active channels
+    active_agents = []
+    
+    for channel, connections in manager.active_connections.items():
+        if channel.startswith("agent:") and len(connections) > 0:
+            agent_id = channel.split(":", 1)[1]
+            active_agents.append({
+                "agent_id": agent_id,
+                "connections": len(connections),
+                "channel": channel
+            })
+    
+    # Also check total broadcast listeners
+    all_connections = len(manager.active_connections.get("all", set()))
+    
+    return {
+        "active_agents": active_agents,
+        "total_broadcast_listeners": all_connections,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# ============================================================================
 # WEBSOCKET - Real-time Updates
 # ============================================================================
 
