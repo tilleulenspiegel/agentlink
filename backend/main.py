@@ -105,14 +105,15 @@ async def redis_listener():
             redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
             pubsub = redis_client.pubsub()
             
-            # Subscribe to broadcast channel
-            await pubsub.subscribe("agentlink:states")
-            logger.info("Redis listener started - subscribed to agentlink:states")
+            # Subscribe to all agentlink channels using pattern
+            await pubsub.psubscribe("agentlink:*")
+            logger.info("Redis listener started - subscribed to agentlink:*")
             
             retry_delay = 1  # Reset delay on successful connection
             
             async for message in pubsub.listen():
-                if message["type"] == "message":
+                # Handle both direct messages and pattern messages
+                if message["type"] in ["message", "pmessage"]:
                     try:
                         data = json.loads(message["data"])
                         
