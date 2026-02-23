@@ -22,19 +22,19 @@ function Analytics() {
   const [timeWindow, setTimeWindow] = useState(24);
 
   useEffect(() => {
+    const loadData = () => {
+      setLoading(true);
+      Promise.all([api.getAnalytics(timeWindow), api.getStats()])
+        .then(([analyticsData, statsData]) => {
+          setAnalytics(analyticsData);
+          setStats(statsData);
+        })
+        .catch((err) => setError(err.message))
+        .finally(() => setLoading(false));
+    };
+    
     loadData();
   }, [timeWindow]);
-
-  const loadData = () => {
-    setLoading(true);
-    Promise.all([api.getAnalytics(timeWindow), api.getStats()])
-      .then(([analyticsData, statsData]) => {
-        setAnalytics(analyticsData);
-        setStats(statsData);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  };
 
   if (loading) {
     return <div className="text-center py-12">Loading analytics...</div>;

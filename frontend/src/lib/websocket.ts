@@ -14,6 +14,7 @@ export class WebSocketClient {
   private handlers: Set<WSEventHandler> = new Set();
   private currentChannel = 'all';
   private autoReconnect: boolean;
+  private subscriberCount = 0; // Track active subscribers
 
   constructor(autoReconnect = true) {
     this.autoReconnect = autoReconnect;
@@ -99,9 +100,18 @@ export class WebSocketClient {
 
   on(handler: WSEventHandler): () => void {
     this.handlers.add(handler);
+    this.subscriberCount++;
+    
     // Return unsubscribe function
     return () => {
       this.handlers.delete(handler);
+      this.subscriberCount--;
+      
+      // Auto-disconnect if no subscribers left
+      if (this.subscriberCount === 0 && this.ws) {
+        console.log('No subscribers left, disconnecting WebSocket');
+        this.disconnect();
+      }
     };
   }
 
@@ -128,6 +138,8 @@ export class WebSocketClient {
           this.reconnectDelay * 2,
           this.maxReconnectDelay
         );
+        // Retry connection after backoff
+        this.scheduleReconnect();
       });
     }, this.reconnectDelay);
   }

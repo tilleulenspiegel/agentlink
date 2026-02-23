@@ -11,33 +11,52 @@ function Dashboard() {
   const [latestEvents, setLatestEvents] = useState<WSMessage[]>([]);
 
   useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let mounted = true;
+
     // Fetch initial stats
     api
       .getStats()
-      .then(setStats)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (mounted) setStats(data);
+      })
+      .catch((err) => {
+        if (mounted) setError(err.message);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
 
-    // Connect WebSocket
+    // Connect WebSocket and subscribe after successful connection
     wsClient
       .connect('all')
-      .then(() => setWsConnected(true))
+      .then(() => {
+        if (!mounted) return;
+        
+        setWsConnected(true);
+
+        // Subscribe to WebSocket events AFTER connection is established
+        unsubscribe = wsClient.on((message) => {
+          console.log('WebSocket message:', message);
+          setLatestEvents((prev) => [message, ...prev].slice(0, 10));
+
+          // Refresh stats on state changes
+          if (message.type === 'state_created' || message.type === 'handoff_received') {
+            api.getStats()
+              .then((data) => {
+                if (mounted) setStats(data);
+              })
+              .catch((err) => console.error('Failed to refresh stats:', err));
+          }
+        });
+      })
       .catch((err) => console.error('WebSocket connection failed:', err));
 
-    // Listen to WebSocket events
-    const unsubscribe = wsClient.on((message) => {
-      console.log('WebSocket message:', message);
-      setLatestEvents((prev) => [message, ...prev].slice(0, 10));
-
-      // Refresh stats on state changes
-      if (message.type === 'state_created' || message.type === 'handoff_received') {
-        api.getStats().then(setStats);
-      }
-    });
-
     return () => {
-      unsubscribe();
-      wsClient.disconnect();
+      mounted = false;
+      if (unsubscribe) {
+        unsubscribe();
+      }
     };
   }, []);
 

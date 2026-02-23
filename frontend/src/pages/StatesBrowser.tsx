@@ -12,7 +12,12 @@ function StatesBrowser() {
   });
 
   useEffect(() => {
-    loadStates();
+    // Debounce API calls to avoid spam
+    const timer = setTimeout(() => {
+      loadStates();
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
   }, [filter]);
 
   const loadStates = () => {
