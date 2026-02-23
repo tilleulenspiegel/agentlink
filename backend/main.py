@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from redis.asyncio import Redis
 
 from database import get_db, init_db, AgentStateDB
@@ -48,47 +49,34 @@ class ConnectionManager:
         """Remove WebSocket from all subscriptions"""
         for channel_set in self.active_connections.values():
             if websocket in channel_set:
-                channel_set.remove(websocket)
+                channel_set.discard(websocket)
         logger.info("Client disconnected")
     
     async def broadcast(self, message: dict, channel: str = "all"):
         """Broadcast message to all clients subscribed to channel"""
         message_json = json.dumps(message)
         
-        # Broadcast to "all" channel
-        if channel == "all":
-            dead_connections = set()
-            for ws in self.active_connections.get("all", set()):
-                try:
-                    await ws.send_text(message_json)
-                except Exception as e:
-                    logger.error(f"Error broadcasting to client: {e}")
-                    dead_connections.add(ws)
-            
-            # Cleanup dead connections
-            for ws in dead_connections:
-                self.disconnect(ws)
+        # Snapshot connections to avoid set modification during iteration
+        clients = list(self.active_connections.get(channel, set()))
+        dead_connections = []
         
-        # Broadcast to specific agent channel
-        if channel.startswith("agent:"):
-            dead_connections = set()
-            for ws in self.active_connections.get(channel, set()):
-                try:
-                    await ws.send_text(message_json)
-                except Exception as e:
-                    logger.error(f"Error broadcasting to {channel}: {e}")
-                    dead_connections.add(ws)
-            
-            # Cleanup dead connections
-            for ws in dead_connections:
-                self.disconnect(ws)
+        for ws in clients:
+            try:
+                await ws.send_text(message_json)
+            except Exception as e:
+                logger.error(f"Error broadcasting to {channel}: {e}")
+                dead_connections.append(ws)
+        
+        # Cleanup dead connections after iteration
+        for ws in dead_connections:
+            self.disconnect(ws)
 
 manager = ConnectionManager()
 
 app = FastAPI(
     title="AgentLink API",
     description="Agent-to-Agent State Protocol with Redis Pub/Sub",
-    version="0.3.0"
+    version="0.3.1"
 )
 
 # CORS for local development
@@ -106,43 +94,61 @@ app.add_middleware(
 # ============================================================================
 
 async def redis_listener():
-    """Background task listening to Redis Pub/Sub"""
+    """Background task listening to Redis Pub/Sub with exponential backoff"""
     global redis_client, pubsub
     
-    try:
-        redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
-        pubsub = redis_client.pubsub()
-        
-        # Subscribe to broadcast channel
-        await pubsub.subscribe("agentlink:states")
-        logger.info("Redis listener started - subscribed to agentlink:states")
-        
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                try:
-                    data = json.loads(message["data"])
-                    
-                    # Broadcast to WebSocket clients
-                    await manager.broadcast(data, channel="all")
-                    
-                    # Also broadcast to agent-specific channel if applicable
-                    if "from_agent" in data:
-                        agent_channel = f"agent:{data['from_agent']}"
-                        await manager.broadcast(data, channel=agent_channel)
-                    
-                    logger.info(f"Broadcasted message: {data.get('type', 'unknown')}")
-                    
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid JSON from Redis: {e}")
-                except Exception as e:
-                    logger.error(f"Error processing Redis message: {e}")
+    retry_delay = 1
+    max_delay = 32
     
-    except Exception as e:
-        logger.error(f"Redis listener error: {e}")
-        # Exponential backoff reconnect
-        await asyncio.sleep(5)
-        logger.info("Attempting to reconnect...")
-        asyncio.create_task(redis_listener())
+    while True:  # Retry loop inside task to avoid spawning multiple tasks
+        try:
+            redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
+            pubsub = redis_client.pubsub()
+            
+            # Subscribe to broadcast channel
+            await pubsub.subscribe("agentlink:states")
+            logger.info("Redis listener started - subscribed to agentlink:states")
+            
+            retry_delay = 1  # Reset delay on successful connection
+            
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    try:
+                        data = json.loads(message["data"])
+                        
+                        # Broadcast to "all" channel
+                        await manager.broadcast(data, channel="all")
+                        
+                        # Only broadcast to agent channel if it's a handoff
+                        if data.get("type") == "handoff_received" and "to_agent" in data:
+                            agent_channel = f"agent:{data['to_agent']}"
+                            await manager.broadcast(data, channel=agent_channel)
+                        
+                        logger.info(f"Broadcasted message: {data.get('type', 'unknown')}")
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Invalid JSON from Redis: {e}")
+                    except Exception as e:
+                        logger.error(f"Error processing Redis message: {e}")
+        
+        except Exception as e:
+            logger.error(f"Redis listener error: {e}")
+            logger.info(f"Reconnecting in {retry_delay}s...")
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, max_delay)  # Exponential backoff
+        
+        finally:
+            # Cleanup connections
+            if pubsub:
+                try:
+                    await pubsub.close()
+                except Exception as e:
+                    logger.error(f"Error closing pubsub: {e}")
+            if redis_client:
+                try:
+                    await redis_client.close()
+                except Exception as e:
+                    logger.error(f"Error closing redis client: {e}")
 
 
 async def publish_to_redis(channel: str, message: dict):
@@ -283,9 +289,15 @@ async def shutdown_event():
     global redis_client, pubsub
     
     if pubsub:
-        await pubsub.close()
+        try:
+            await pubsub.close()
+        except Exception as e:
+            logger.error(f"Error closing pubsub on shutdown: {e}")
     if redis_client:
-        await redis_client.close()
+        try:
+            await redis_client.close()
+        except Exception as e:
+            logger.error(f"Error closing redis client on shutdown: {e}")
     logger.info("AgentLink backend shutdown")
 
 
@@ -297,7 +309,7 @@ async def shutdown_event():
 async def root():
     return {
         "service": "AgentLink",
-        "version": "0.3.0",
+        "version": "0.3.1",
         "status": "online",
         "features": ["PostgreSQL", "Redis Pub/Sub", "WebSocket"],
         "endpoints": {
@@ -361,6 +373,7 @@ async def create_state(state: AgentState, db: Session = Depends(get_db)):
             "timestamp": state.timestamp.isoformat(),
         }
         await publish_to_redis(f"agentlink:agent:{state.handoff.to_agent}", handoff_message)
+        logger.info(f"Handoff published to agent:{state.handoff.to_agent}")
     
     return db_to_pydantic(db_state)
 
@@ -409,11 +422,11 @@ async def delete_state(state_id: str, db: Session = Depends(get_db)):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for real-time state updates"""
+    # Accept connection and register with ConnectionManager
+    await manager.connect(websocket, channel="all")
     current_channel = "all"
     
     try:
-        await manager.connect(websocket, channel=current_channel)
-        
         # Send welcome message
         await websocket.send_json({
             "type": "connected",
@@ -432,22 +445,41 @@ async def websocket_endpoint(websocket: WebSocket):
                 if action == "subscribe":
                     new_channel = message.get("channel", "all")
                     
-                    # Unsubscribe from current
+                    # Validate channel
+                    if new_channel == "all":
+                        # OK
+                        pass
+                    elif new_channel.startswith("agent:"):
+                        agent_id = new_channel.split(":", 1)[1]
+                        # Validate agent_id (alphanumeric + underscore/dash)
+                        if not re.match(r'^[a-zA-Z0-9_-]+$', agent_id):
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "Invalid agent_id format"
+                            })
+                            continue
+                    else:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Unknown channel type (use 'all' or 'agent:ID')"
+                        })
+                        continue
+                    
+                    # Unsubscribe from current channel
                     if current_channel in manager.active_connections:
                         manager.active_connections[current_channel].discard(websocket)
                     
-                    # Subscribe to new
-                    if new_channel.startswith("agent:") or new_channel == "all":
-                        current_channel = new_channel
-                        if current_channel not in manager.active_connections:
-                            manager.active_connections[current_channel] = set()
-                        manager.active_connections[current_channel].add(websocket)
-                        
-                        await websocket.send_json({
-                            "type": "subscribed",
-                            "channel": current_channel,
-                            "timestamp": datetime.utcnow().isoformat()
-                        })
+                    # Subscribe to new channel
+                    current_channel = new_channel
+                    if current_channel not in manager.active_connections:
+                        manager.active_connections[current_channel] = set()
+                    manager.active_connections[current_channel].add(websocket)
+                    
+                    await websocket.send_json({
+                        "type": "subscribed",
+                        "channel": current_channel,
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
                 
                 elif action == "unsubscribe":
                     manager.disconnect(websocket)
