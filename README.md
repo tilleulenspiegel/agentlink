@@ -1,145 +1,202 @@
 # AgentLink
 
-**Agent-to-Agent State Protocol**
+**Agent-to-Agent State Protocol** - Direct state transfer between AI agents, eliminating lossy natural-language reconstruction.
 
-AgentLink enables AI agents to transfer internal states instead of reconstructing context from natural language. Think: Joshua finds a bug → serializes his understanding → Castiel loads it directly. No information loss, no "dial-up modem vibes."
+## 🎯 What is AgentLink?
 
-## Architecture
+AgentLink enables AI agents to transfer complete internal states with full context preservation:
+- **Working memory** (hypotheses, decisions, findings)
+- **Task context** (files, git info, errors)
+- **Knowledge references** (A-MEM IDs, QMD refs, external URLs)
+- **Handoff metadata** (target agent, reasoning, required skills)
 
-```
-┌─────────────┐     WebSocket      ┌─────────────┐
-│   Agent A   │ ◄─────────────────► │  AgentLink  │
-│  (Castiel)  │                     │   Server    │
-└─────────────┘                     └─────────────┘
-                                           │
-                    ┌──────────────────────┼──────────────────────┐
-                    │                      │                      │
-              ┌──────▼──────┐      ┌──────▼──────┐      ┌────────▼────────┐
-              │  PostgreSQL │      │    Redis    │      │    ChromaDB     │
-              │   (States)  │      │  (PubSub)   │      │  (Embeddings)   │
-              └─────────────┘      └─────────────┘      └─────────────────┘
-```
+**No more dial-up modem vibes!** 📡→💾
 
-## Components
-
-- **Backend** (FastAPI) - State storage, WebSocket broadcasting
-- **Client** (TypeScript) - OpenClaw plugin for agent integration
-- **Database** (PostgreSQL) - Persistent state storage
-- **Cache** (Redis) - Real-time pub/sub, ephemeral states
-- **Search** (ChromaDB) - Semantic search over states
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
-
 - Docker & Docker Compose
-- Python 3.11+ (for local development)
-- Node.js 18+ (for client development)
+- Node.js 18+ (for TypeScript client)
 
-### Run Everything
+### Deploy Backend
 
 ```bash
-docker-compose up -d
+cd agentlink
+docker compose up -d
 ```
 
-Services will be available at:
-- **Backend API:** http://localhost:8000
-- **PostgreSQL:** localhost:5432
-- **Redis:** localhost:6379
-- **ChromaDB:** http://localhost:8001
+Services:
+- Backend API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- PostgreSQL: localhost:5432
+- Redis: localhost:6379
+- ChromaDB: localhost:8001
 
-### API Docs
+### Install TypeScript Client
 
-Interactive API documentation: http://localhost:8000/docs
-
-### Development
-
-**Backend:**
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-
-**Client:**
 ```bash
 cd client
 npm install
-npm run dev
+npm run build
 ```
 
-## Agent State Schema v1
+### Basic Usage
 
 ```typescript
-{
-  id: uuid,
-  agent_id: string,
-  timestamp: iso8601,
-  
+import { AgentLinkClient } from '@agentlink/client';
+
+const client = new AgentLinkClient({
+  url: 'http://localhost:8000',
+  agentId: 'my-agent'
+});
+
+// Create a state
+const state = await client.createState({
   task: {
-    type: "bug_fix" | "feature" | "review" | "research" | "refactor",
-    description: string,
-    priority: 1-5,
-    status: "pending" | "in_progress" | "blocked" | "done"
+    type: 'bug_fix',
+    description: 'Fix datetime serialization',
+    priority: 5,
+    status: 'done'
   },
-  
   context: {
-    files: [{ path, diff?, lines?, hash? }],
-    git?: { repo, branch, commit },
-    errors?: [{ type, message, stack? }]
+    files: [{ path: 'backend/main.py', diff: 'Fixed model_dump' }],
+    git: { repo: 'agentlink', branch: 'main', commit: 'abc123' }
   },
-  
-  knowledge: {
-    amem_ids?: string[],     // A-MEM references
-    qmd_refs?: string[],     // QMD paths
-    external_urls?: string[]
-  },
-  
   working_memory: {
-    hypotheses?: string[],
-    open_questions?: string[],
-    decisions?: [{ what, why, when }],
-    findings?: string[]
+    decisions: [{
+      what: 'Use model_dump(mode="json")',
+      why: 'Pydantic v2 datetime serialization',
+      when: new Date().toISOString()
+    }]
   },
-  
-  handoff?: {
-    to_agent?: string,
-    reason?: string,
-    required_skills?: string[]
+  handoff: {
+    to_agent: 'reviewer',
+    reason: 'Code review needed',
+    required_skills: ['python', 'fastapi']
   }
-}
+});
+
+// Get a state
+const retrieved = await client.getState(state.id);
+
+// List states
+const states = await client.listStates({ agent_id: 'my-agent' });
 ```
 
-## Roadmap
+## 📊 Architecture
 
-**Phase 1: Foundation** (Current)
-- [x] Basic FastAPI server
-- [x] Docker Compose setup
-- [x] State schema v1
-- [ ] PostgreSQL persistence
-- [ ] Redis pub/sub
-- [ ] ChromaDB indexing
+```
+┌─────────────┐
+│   Agents    │
+│ (Castiel,   │
+│  Lilith,    │
+│  David...)  │
+└──────┬──────┘
+       │
+       ▼
+┌─────────────────┐
+│ TypeScript      │
+│ Client Library  │
+│ - REST API      │
+│ - WebSocket     │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ FastAPI Backend │
+│ - State CRUD    │
+│ - Validation    │
+└────────┬────────┘
+         │
+    ┌────┴────┬─────────┬──────────┐
+    ▼         ▼         ▼          ▼
+┌──────┐ ┌──────┐ ┌──────┐ ┌─────────┐
+│ Postgre│Chrome│ Redis│ │(Future) │
+│  SQL   │  DB  │PubSub│ │EventSrc │
+└────────┘ └──────┘ └──────┘ └─────────┘
+```
 
-**Phase 2: Integration**
-- [ ] TypeScript client library
-- [ ] OpenClaw plugin
-- [ ] Authentication (shared secret)
-- [ ] First live handoff test
+## 🎯 Current Status
 
-**Phase 3: Production**
-- [ ] Dedicated server deployment
-- [ ] OAuth/JWT authentication
-- [ ] State history & versioning
-- [ ] Performance optimization
+**Phase 1 - MVP ✅ COMPLETE**
+- [x] Backend (FastAPI + PostgreSQL)
+- [x] TypeScript Client (REST + WebSocket stub)
+- [x] Real handoff validated (Castiel ↔ Lilith)
+- [x] Docker deployment
+- [x] Schema versioning
 
-## Development
+**Phase 2 - OpenClaw Plugin** 🔌 (Next)
+- [ ] OpenClaw plugin wrapper
+- [ ] CLI integration
+- [ ] Session memory integration
 
-Built by **Castiel** (Backend) and **Lilith** (Client/Integration).
+**Phase 3 - Real-time & Event Sourcing** (Future)
+- [ ] Redis Pub/Sub for WebSocket broadcasting
+- [ ] Event Sourcing layer for audit trails
+- [ ] ChromaDB semantic search
+- [ ] Blockchain/IPFS hybrid storage
 
-Coordinated via: `#agentlink-dev` on Discord
+## 📖 Documentation
 
-Repository: http://192.168.178.203:3000/claude/agentlink
+- [Deployment Guide](./DEPLOYMENT.md)
+- [First Handoff Test](./HANDOFF-TEST.md)
+- [API Reference](http://localhost:8000/docs) (when running)
+- [Client API](./client/README.md)
 
-## License
+## 🧪 Validation
 
-TBD
+**First successful agent-to-agent handoff:**
+- Castiel (Linux VM, TypeScript) → Lilith (Windows, curl)
+- Full state transfer with context preservation
+- Round-trip validated ✅
+
+See [HANDOFF-TEST.md](./HANDOFF-TEST.md) for details.
+
+## 🛠️ Development
+
+```bash
+# Backend
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+
+# Client
+cd client
+npm install
+npm run build
+npm run dev  # watch mode
+```
+
+## 📝 State Schema
+
+See [backend/main.py](./backend/main.py) for full schema definitions.
+
+Key fields:
+- `agent_id`: Agent identifier
+- `task`: Task type, description, priority, status
+- `context`: Files, git info, errors
+- `knowledge`: A-MEM IDs, QMD refs, URLs
+- `working_memory`: Hypotheses, decisions, findings
+- `handoff`: Target agent, reason, required skills
+
+## 🚀 Roadmap
+
+1. **OpenClaw Plugin** - Make it usable from live sessions
+2. **Real-time Updates** - Redis Pub/Sub + WebSocket
+3. **Event Sourcing** - Full audit trail
+4. **Semantic Search** - ChromaDB integration
+5. **Blockchain Layer** - Immutable state history
+
+## 📜 License
+
+MIT
+
+## 🤝 Contributors
+
+- Castiel 🪶 - Backend, Client, Infrastructure
+- Lilith 🌙 - Architecture, Protocol Design
+- Till - Product Vision
+
+---
+
+**Built with ❤️ by AI agents, for AI agents.**
