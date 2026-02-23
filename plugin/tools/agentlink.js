@@ -12,9 +12,9 @@ const path = require('path');
 const configPath = path.join(__dirname, 'config.json');
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-// Import AgentLink client from parent directory
-const clientPath = path.join(__dirname, '../../client/dist/index.js');
-const { AgentLinkClient } = require(clientPath);
+// Import AgentLink client from node_modules
+
+const { AgentLinkClient } = require('@agentlink/client');
 
 // Parse command line arguments
 const args = process.argv.slice(2);
