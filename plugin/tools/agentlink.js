@@ -24,7 +24,23 @@ const command = args[0];
 function getAgentId() {
   if (config.agentId === 'auto') {
     // Try to get from OpenClaw environment
-    return process.env.OPENCLAW_AGENT || process.env.AGENT_ID || 'default-agent';
+    // Fall back to reading OpenClaw config if env vars not available (Windows)
+    const agentFromEnv = process.env.OPENCLAW_AGENT || process.env.AGENT_ID;
+    if (agentFromEnv) return agentFromEnv;
+    
+    // Try reading OpenClaw config
+    try {
+      const homeDir = process.env.HOME || process.env.USERPROFILE;
+      const openclawConfigPath = path.join(homeDir, '.openclaw', 'config.json');
+      if (fs.existsSync(openclawConfigPath)) {
+        const openclawConfig = JSON.parse(fs.readFileSync(openclawConfigPath, 'utf8'));
+        if (openclawConfig.agentId) return openclawConfig.agentId;
+      }
+    } catch (e) {
+      // Ignore errors, fall back to default
+    }
+    
+    return 'default-agent';
   }
   return config.agentId;
 }
@@ -230,6 +246,115 @@ async function checkHealth() {
   console.log(JSON.stringify(health, null, 2));
 }
 
+
+// ============================================================================
+// PHASE 5.2: CLAIM/RELEASE/EXTEND COMMANDS
+// ============================================================================
+
+async function claimState(parsed) {
+  const { positional, options } = parsed;
+  
+  if (!positional[1]) {
+    console.error('Error: state ID required');
+    console.error('Usage: agentlink claim <state-id> [--duration <minutes>]');
+    process.exit(1);
+  }
+  
+  const stateId = positional[1];
+  const duration = parseInt(options.duration || '30');
+  
+  try {
+    const response = await fetch(`${config.url}/api/states/${stateId}/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: getAgentId(),
+        duration_minutes: duration
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    
+    const result = await response.json();
+    console.log(`🔒 Claimed state ${stateId.slice(0, 8)}...`);
+    console.log(`   Agent: ${result.claimed_by}`);
+    console.log(`   Expires: ${result.expires_at}`);
+  } catch (error) {
+    console.error('❌ Claim failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function releaseState(parsed) {
+  const { positional } = parsed;
+  
+  if (!positional[1]) {
+    console.error('Error: state ID required');
+    console.error('Usage: agentlink release <state-id>');
+    process.exit(1);
+  }
+  
+  const stateId = positional[1];
+  
+  try {
+    const response = await fetch(`${config.url}/api/states/${stateId}/release?agent_id=${getAgentId()}`, {
+      method: 'POST'
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    
+    const result = await response.json();
+    console.log(`🔓 ${result.message} (${stateId.slice(0, 8)}...)`);
+  } catch (error) {
+    console.error('❌ Release failed:', error.message);
+    process.exit(1);
+  }
+}
+
+async function extendClaim(parsed) {
+  const { positional, options } = parsed;
+  
+  if (!positional[1]) {
+    console.error('Error: state ID required');
+    console.error('Usage: agentlink extend <state-id> [--duration <minutes>]');
+    process.exit(1);
+  }
+  
+  const stateId = positional[1];
+  const duration = parseInt(options.duration || '30');
+  
+  try {
+    const response = await fetch(`${config.url}/api/states/${stateId}/extend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: getAgentId(),
+        duration_minutes: duration
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    
+    const result = await response.json();
+    console.log(`⏰ Extended claim on ${stateId.slice(0, 8)}...`);
+    console.log(`   New expiry: ${result.expires_at}`);
+  } catch (error) {
+    console.error('❌ Extend failed:', error.message);
+    process.exit(1);
+  }
+}
+
+
+
 function showHelp() {
   console.log(`
 AgentLink OpenClaw Plugin
@@ -241,6 +366,9 @@ Commands:
   get-state <id>   Retrieve a state by ID
   list-states      List all states (optionally filtered)
   handoff <agent>  Create handoff to another agent
+  claim <id>       Claim a state for exclusive work
+  release <id>     Release a claimed state
+  extend <id>      Extend claim timeout
   health           Check backend health
 
 Examples:
@@ -248,6 +376,9 @@ Examples:
   agentlink get-state 1b96224e-e303-4d6c-a99e-2d58c1b51ad6
   agentlink list-states --agent-id castiel
   agentlink handoff lilith --reason "Architecture review"
+  agentlink claim abc123 --duration 60
+  agentlink release abc123
+  agentlink extend abc123 --duration 30
   agentlink health
 
 For detailed usage, see SKILL.md
@@ -272,7 +403,16 @@ async function main() {
       case 'handoff':
         await createHandoff(parsed);
         break;
-      case 'health':
+            case 'claim':
+        await claimState(parsed);
+        break;
+      case 'release':
+        await releaseState(parsed);
+        break;
+      case 'extend':
+        await extendClaim(parsed);
+        break;
+case 'health':
         await checkHealth();
         break;
       case '--help':

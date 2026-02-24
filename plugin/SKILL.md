@@ -96,6 +96,42 @@ agentlink handoff <agent-id> \
 
 Uses current session state and hands off to target agent.
 
+### Claim State
+
+Claim a state for exclusive work (prevents concurrent editing):
+
+```bash
+agentlink claim <state-id>
+agentlink claim <state-id> --duration 60
+```
+
+**Options:**
+- `--duration <minutes>`: Claim duration (default: 30 minutes)
+
+Returns 409 Conflict if already claimed by another agent.
+
+### Release State
+
+Release a claimed state:
+
+```bash
+agentlink release <state-id>
+```
+
+Only the claiming agent can release. Returns error if not claimed or claimed by different agent.
+
+### Extend Claim
+
+Extend an existing claim:
+
+```bash
+agentlink extend <state-id>
+agentlink extend <state-id> --duration 90
+```
+
+**Options:**
+- `--duration <minutes>`: New claim duration from now (default: 30 minutes)
+
 ### Health Check
 
 Check backend health:
@@ -149,6 +185,32 @@ agentlink create-state \
   --status done \
   --handoff implementer
 ```
+
+### Example: Claim & Collaborate
+
+```bash
+# Agent A finds a state to work on
+agentlink list-states --status pending
+
+# Claim it to prevent concurrent work
+agentlink claim <state-id> --duration 60
+
+# Do the work...
+# If taking longer than expected:
+agentlink extend <state-id> --duration 90
+
+# When done:
+agentlink release <state-id>
+
+# If Agent B tries to claim while A has it:
+agentlink claim <state-id>
+# ❌ Error: State already claimed by castiel until 2026-02-24 22:30:00
+```
+
+**Use claims to prevent:**
+- Parallel editing conflicts (like the memory/2026-02-24.md incident!)
+- Wasted work when multiple agents pick the same task
+- Race conditions in multi-agent workflows
 
 ## Integration with Session Memory
 
