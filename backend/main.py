@@ -169,6 +169,64 @@ async def publish_to_redis(channel: str, message: dict):
 
 
 # ============================================================================
+# ============================================================================
+# PHASE 5.1: AUTO-TIMEOUT BACKGROUND TASK
+# ============================================================================
+
+async def auto_timeout_task():
+    """
+    Background task that runs every 60 seconds.
+    Releases expired claims automatically.
+    """
+    while True:
+        try:
+            await asyncio.sleep(60)  # Run every 60 seconds
+            
+            # Get DB session
+            db_gen = get_db()
+            db = next(db_gen)
+            
+            try:
+                # Find expired claims
+                now = datetime.utcnow()
+                expired_states = db.query(AgentStateDB).filter(
+                    AgentStateDB.claimed_by.isnot(None),
+                    AgentStateDB.claim_expires_at < now
+                ).all()
+                
+                if expired_states:
+                    logger.info(f"Found {len(expired_states)} expired claims, releasing...")
+                    
+                    for db_state in expired_states:
+                        # Log who had it
+                        old_owner = db_state.claimed_by
+                        state_id = db_state.id
+                        
+                        # Release claim
+                        db_state.claimed_by = None
+                        db_state.claimed_at = None
+                        db_state.claim_expires_at = None
+                        
+                        # Broadcast event
+                        await publish_to_redis("agentlink:events", {
+                            "type": "state.claim.timeout",
+                            "state_id": state_id,
+                            "previous_owner": old_owner,
+                            "released_at": now.isoformat()
+                        })
+                        
+                        logger.info(f"Auto-released claim on {state_id[:8]}... (was: {old_owner})")
+                    
+                    db.commit()
+                    
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"Error in auto_timeout_task: {e}")
+            # Continue running even after errors
+
+
 # SCHEMA - Agent State v1
 # ============================================================================
 
@@ -299,6 +357,7 @@ async def startup_event():
     """Initialize database and Redis listener on startup"""
     init_db()
     asyncio.create_task(redis_listener())
+    asyncio.create_task(auto_timeout_task())
     logger.info("AgentLink backend started")
 
 
