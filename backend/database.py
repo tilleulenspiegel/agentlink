@@ -30,6 +30,11 @@ class AgentStateDB(Base):
     knowledge = Column(JSON, nullable=False)
     working_memory = Column(JSON, nullable=False)
     handoff = Column(JSON, nullable=True)
+    
+    # Phase 5: State Locking & Coordination
+    claimed_by = Column(String, nullable=True, index=True)
+    claimed_at = Column(DateTime, nullable=True)
+    claim_expires_at = Column(DateTime, nullable=True, index=True)
 
 
 def get_db():

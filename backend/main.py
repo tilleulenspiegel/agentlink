@@ -6,7 +6,7 @@ from fastapi import FastAPI, WebSocket, HTTPException, Depends, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal, Dict, Set
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 from sqlalchemy.orm import Session
 import uvicorn
@@ -241,6 +241,24 @@ class AgentState(BaseModel):
 
 
 # ============================================================================
+# PHASE 5: CLAIM/RELEASE MODELS
+# ============================================================================
+
+class ClaimRequest(BaseModel):
+    """Request to claim a state"""
+    agent_id: str
+    duration_minutes: Optional[int] = 30  # Default 30min
+
+class ClaimResponse(BaseModel):
+    """Response after claiming a state"""
+    state_id: str
+    claimed_by: str
+    claimed_at: datetime
+    expires_at: datetime
+
+
+
+# ============================================================================
 # DATABASE HELPERS
 # ============================================================================
 
@@ -419,6 +437,149 @@ async def delete_state(state_id: str, db: Session = Depends(get_db)):
 # ============================================================================
 # ANALYTICS & STATS ENDPOINTS
 # ============================================================================
+
+# ============================================================================
+# PHASE 5: STATE LOCKING & COORDINATION
+# ============================================================================
+
+from datetime import timedelta
+
+@app.post("/api/states/{state_id}/claim", response_model=ClaimResponse)
+async def claim_state(
+    state_id: str, 
+    request: ClaimRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Claim a state for exclusive work.
+    Returns 409 Conflict if already claimed by another agent.
+    """
+    # Get state
+    db_state = db.query(AgentStateDB).filter(AgentStateDB.id == state_id).first()
+    if not db_state:
+        raise HTTPException(status_code=404, detail="State not found")
+    
+    # Check if already claimed
+    now = datetime.utcnow()
+    if db_state.claimed_by and db_state.claim_expires_at:
+        if db_state.claim_expires_at > now:
+            # Still claimed by someone
+            if db_state.claimed_by != request.agent_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"State already claimed by {db_state.claimed_by} until {db_state.claim_expires_at}"
+                )
+    
+    # Claim it!
+    db_state.claimed_by = request.agent_id
+    db_state.claimed_at = now
+    db_state.claim_expires_at = now + timedelta(minutes=request.duration_minutes)
+    
+    db.commit()
+    db.refresh(db_state)
+    
+    # Broadcast WebSocket event
+    await publish_to_redis("agentlink:events", {
+        "type": "state.claim.acquired",
+        "state_id": state_id,
+        "claimed_by": request.agent_id,
+        "claimed_at": db_state.claimed_at.isoformat(),
+        "expires_at": db_state.claim_expires_at.isoformat()
+    })
+    
+    return ClaimResponse(
+        state_id=state_id,
+        claimed_by=db_state.claimed_by,
+        claimed_at=db_state.claimed_at,
+        expires_at=db_state.claim_expires_at
+    )
+
+
+@app.post("/api/states/{state_id}/release")
+async def release_state(
+    state_id: str,
+    agent_id: str,  # Query parameter
+    db: Session = Depends(get_db)
+):
+    """
+    Release a claimed state.
+    Only the claiming agent can release it.
+    """
+    db_state = db.query(AgentStateDB).filter(AgentStateDB.id == state_id).first()
+    if not db_state:
+        raise HTTPException(status_code=404, detail="State not found")
+    
+    # Check if claimed
+    if not db_state.claimed_by:
+        return {"message": "State was not claimed", "state_id": state_id}
+    
+    # Check if caller is the claimer
+    if db_state.claimed_by != agent_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only {db_state.claimed_by} can release this state"
+        )
+    
+    # Release it
+    db_state.claimed_by = None
+    db_state.claimed_at = None
+    db_state.claim_expires_at = None
+    
+    db.commit()
+    
+    # Broadcast WebSocket event
+    await publish_to_redis("agentlink:events", {
+        "type": "state.claim.released",
+        "state_id": state_id,
+        "released_by": agent_id
+    })
+    
+    return {"message": "State released", "state_id": state_id}
+
+
+@app.post("/api/states/{state_id}/extend", response_model=ClaimResponse)
+async def extend_claim(
+    state_id: str,
+    request: ClaimRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Extend an existing claim.
+    Only the claiming agent can extend it.
+    """
+    db_state = db.query(AgentStateDB).filter(AgentStateDB.id == state_id).first()
+    if not db_state:
+        raise HTTPException(status_code=404, detail="State not found")
+    
+    # Check if claimed by requester
+    if db_state.claimed_by != request.agent_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"State is claimed by {db_state.claimed_by or 'no one'}, not {request.agent_id}"
+        )
+    
+    # Extend the claim
+    now = datetime.utcnow()
+    db_state.claim_expires_at = now + timedelta(minutes=request.duration_minutes)
+    
+    db.commit()
+    db.refresh(db_state)
+    
+    # Broadcast WebSocket event
+    await publish_to_redis("agentlink:events", {
+        "type": "state.claim.extended",
+        "state_id": state_id,
+        "claimed_by": request.agent_id,
+        "new_expires_at": db_state.claim_expires_at.isoformat()
+    })
+    
+    return ClaimResponse(
+        state_id=state_id,
+        claimed_by=db_state.claimed_by,
+        claimed_at=db_state.claimed_at,
+        expires_at=db_state.claim_expires_at
+    )
+
 
 @app.get("/api/stats")
 async def get_stats(db: Session = Depends(get_db)):
