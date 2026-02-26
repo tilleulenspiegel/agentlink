@@ -7,8 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 import os
 
-# Database URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://agentlink:agentlink_dev@localhost:5432/agentlink")
+# Database URL from environment (no default password for security)
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://agentlink@localhost:5432/agentlink")
 
 # SQLAlchemy setup
 engine = create_engine(DATABASE_URL)
