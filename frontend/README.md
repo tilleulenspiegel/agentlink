@@ -40,8 +40,8 @@ npm run preview
 Copy `.env.example` to `.env` and adjust:
 
 ```env
-VITE_API_URL=http://192.168.178.102:8000
-VITE_WS_URL=ws://192.168.178.102:8000/ws
+VITE_API_URL=http://YOUR_VM_IP:8000
+VITE_WS_URL=ws://YOUR_VM_IP:8000/ws
 ```
 
 ## Deployment

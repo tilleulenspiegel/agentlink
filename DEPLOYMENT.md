@@ -12,7 +12,8 @@
 ### 1. Clone Repository
 
 ```bash
-git clone http://192.168.178.203:3000/claude/agentlink.git
+git clone http://YOUR_GITEA_URL/claude/agentlink.git
+# Or use GitHub: git clone https://github.com/tilleulenspiegel/agentlink.git
 cd agentlink
 ```
 
@@ -234,16 +235,16 @@ curl http://localhost:8000/health
 
 ## Current Deployment
 
-**VM:** 192.168.178.102
+**VM:** YOUR_VM_IP
 - Ubuntu 24.04 LTS
 - User: claude
 - Docker version: 27.5.0
 - Docker Compose version: 2.31.0
 
 **Access:**
-- API: http://192.168.178.102:8000
-- Docs: http://192.168.178.102:8000/docs
-- Database: 192.168.178.102:5432
+- API: http://YOUR_VM_IP:8000
+- Docs: http://YOUR_VM_IP:8000/docs
+- Database: YOUR_VM_IP:5432
 
 **Status:** ✅ Running (Phase 1 MVP complete)
 

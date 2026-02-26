@@ -25,7 +25,7 @@ Create `tools/config.json`:
 
 ```json
 {
-  "url": "http://192.168.178.102:8000",
+  "url": "http://YOUR_VM_IP:8000",
   "agentId": "auto"
 }
 ```
@@ -222,7 +222,7 @@ AgentLink automatically integrates with OpenClaw session memory:
 ## Backend Deployment
 
 See main AgentLink repository:
-- http://192.168.178.203:3000/claude/agentlink
+- https://github.com/tilleulenspiegel/agentlink
 
 ## Troubleshooting
 
@@ -230,7 +230,7 @@ See main AgentLink repository:
 
 Check backend is running:
 ```bash
-curl http://192.168.178.102:8000/health
+curl http://YOUR_VM_IP:8000/health
 ```
 
 ### Invalid agent ID

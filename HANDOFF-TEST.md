@@ -15,7 +15,7 @@ Validate end-to-end agent-to-agent state transfer:
 ## Setup
 
 ### Castiel Environment
-- **Platform:** Linux VM (192.168.178.102)
+- **Platform:** Linux VM (YOUR_VM_IP)
 - **Tool:** TypeScript Client
 - **Agent ID:** castiel
 - **Role:** Backend implementer
@@ -27,7 +27,7 @@ Validate end-to-end agent-to-agent state transfer:
 - **Role:** Architect / reviewer
 
 ### Backend
-- **URL:** http://192.168.178.102:8000
+- **URL:** http://YOUR_VM_IP:8000
 - **Database:** PostgreSQL (persistent)
 - **Initial states:** 1 (test state from client validation)
 
@@ -52,7 +52,7 @@ const state = await castiel.createState({
       { path: 'backend/main.py', diff: 'Fixed datetime serialization' }
     ],
     git: {
-      repo: 'http://192.168.178.203:3000/claude/agentlink',
+      repo: 'https://github.com/tilleulenspiegel/agentlink',
       branch: 'main',
       commit: '7ea63a2'
     }
@@ -96,7 +96,7 @@ const state = await castiel.createState({
 **Tool:** curl (Windows PowerShell)
 
 ```bash
-curl http://192.168.178.102:8000/states/1b96224e-e303-4d6c-a99e-2d58c1b51ad6
+curl http://YOUR_VM_IP:8000/states/1b96224e-e303-4d6c-a99e-2d58c1b51ad6
 ```
 
 **Received:**
@@ -111,7 +111,7 @@ curl http://192.168.178.102:8000/states/1b96224e-e303-4d6c-a99e-2d58c1b51ad6
 **Tool:** curl POST with JSON payload
 
 ```bash
-curl -X POST http://192.168.178.102:8000/states   -H "Content-Type: application/json"   -d @lilith-response.json
+curl -X POST http://YOUR_VM_IP:8000/states   -H "Content-Type: application/json"   -d @lilith-response.json
 ```
 
 **Response state:**
@@ -239,10 +239,10 @@ node ~/agentlink/handoff-test.js
 ### Lilith Response (Windows)
 ```powershell
 # Fetch state
-curl http://192.168.178.102:8000/states/1b96224e-e303-4d6c-a99e-2d58c1b51ad6
+curl http://YOUR_VM_IP:8000/states/1b96224e-e303-4d6c-a99e-2d58c1b51ad6
 
 # Create response
-curl -X POST http://192.168.178.102:8000/states 
+curl -X POST http://YOUR_VM_IP:8000/states 
   -d @lilith-response.json
 ```
 
@@ -298,7 +298,7 @@ Validate OpenClaw Plugin integration and end-to-end workflow:
 
 ### Testing Environment
 - **Session:** Castiel's local OpenClaw
-- **Backend:** http://192.168.178.102:8000
+- **Backend:** http://YOUR_VM_IP:8000
 - **Agent ID:** Auto-detected from environment (`AGENT_ID=castiel`)
 
 ## Test Flow
@@ -307,7 +307,7 @@ Validate OpenClaw Plugin integration and end-to-end workflow:
 
 ```bash
 # Copied plugin from VM
-scp -r claude@192.168.178.102:~/agentlink/plugin ~/.openclaw/workspace/skills/agentlink/
+scp -r claude@YOUR_VM_IP:~/agentlink/plugin ~/.openclaw/workspace/skills/agentlink/
 
 # Fixed import path for node_modules
 # Changed: path.join(__dirname, '../../client/dist/index.js')
