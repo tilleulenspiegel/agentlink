@@ -5,7 +5,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: agentlink
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME_BEFORE_DEPLOY}
       POSTGRES_DB: agentlink
     ports:
       - "5432:5432"
@@ -53,7 +53,7 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      DATABASE_URL: postgresql://agentlink:${POSTGRES_PASSWORD:-changeme}@postgres:5432/agentlink
+      DATABASE_URL: postgresql://agentlink:${POSTGRES_PASSWORD:-CHANGE_ME_BEFORE_DEPLOY}@postgres:5432/agentlink
       REDIS_URL: redis://redis:6379
       CHROMA_URL: http://chromadb:8000
     depends_on:

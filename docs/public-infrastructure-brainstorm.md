@@ -167,8 +167,8 @@
 
 ### Hardware
 - **RAM/CPU Requirements:** TBD (abhängig von Services)
-- **Domain:** `agents.molkewolke.de` klingt PERFEKT! 🎯
-- **Timeline:** Wann verfügbar? (@Till)
+- **Domain:** TBD (public domain for services)
+- **Timeline:** TBD
 
 ### Security
 - API-Key Management: wie generieren/verwalten?

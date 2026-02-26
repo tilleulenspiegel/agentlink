@@ -58,7 +58,7 @@ Create `.env` in project root:
 ```env
 # Database
 POSTGRES_USER=agentlink
-POSTGRES_PASSWORD=agentlink_dev
+POSTGRES_PASSWORD=YOUR_DB_PASSWORD
 POSTGRES_DB=agentlink
 
 # Backend
