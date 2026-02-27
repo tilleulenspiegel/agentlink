@@ -73,6 +73,22 @@ services:
     depends_on:
       - backend
 
+  matrix-notifier:
+    build:
+      context: ./matrix-notifier
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://agentlink:${POSTGRES_PASSWORD:-CHANGE_ME_BEFORE_DEPLOY}@postgres:5432/agentlink
+      MATRIX_HOMESERVER: ${MATRIX_HOMESERVER:-https://talk.molkewolke.de}
+      MATRIX_USER_ID: ${MATRIX_USER_ID:-@agentlink:talk.molkewolke.de}
+      MATRIX_ACCESS_TOKEN: ${MATRIX_ACCESS_TOKEN}
+      MATRIX_ROOM_ID: ${MATRIX_ROOM_ID}
+      POLL_INTERVAL: ${POLL_INTERVAL:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
