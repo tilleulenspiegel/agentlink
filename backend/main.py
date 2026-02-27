@@ -452,6 +452,19 @@ async def create_state(state: AgentState, db: Session = Depends(get_db)):
         }
         await publish_to_redis(f"agentlink:agent:{state.handoff.to_agent}", handoff_message)
         logger.info(f"Handoff published to agent:{state.handoff.to_agent}")
+        # Also insert into handoffs table for Matrix notifier
+        try:
+            from sqlalchemy import text as sa_text
+            db.execute(sa_text("INSERT INTO handoffs (source_agent, target_agent, task, context, status) VALUES (:source, :target, :task, cast(:context as jsonb), 'pending')"), {
+                "source": state.agent_id,
+                "target": state.handoff.to_agent,
+                "task": state.task.description,
+                "context": json.dumps({"reason": state.handoff.reason, "state_id": str(state.id)})
+            })
+            db.commit()
+            logger.info(f"Inserted into handoffs table for {state.handoff.to_agent}")
+        except Exception as e:
+            logger.error(f"Failed to insert into handoffs table: {e}")
     
     return db_to_pydantic(db_state)
 
